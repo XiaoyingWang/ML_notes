@@ -105,14 +105,14 @@ print("Validation MAE for Random Forest Model: {}".format(rf_val_mae))
 
 # Intermediate machine learning
 ## Key words
-- missing values; categorical variables
+- missing values
+- categorical variables
 - pipelines
 - cross validation
 - XGBoost
 - leakage
-## Notes and Sample codes
-### Missing values
-#### drop
+## Missing values
+### drop
 - drop columns or rows (or sample) with missing values
     - works if like 80% of values are missing for a column
     - lose information if most value of the column is not missing
@@ -127,7 +127,7 @@ cols_with_missing = [col for col in X_train.columns
 # Drop columns in training and validation data
 reduced_X_train = X_train.drop(cols_with_missing, axis=1)
 ```
-#### imputation
+### imputation
 - simple imputation: fill in mean, median, most frequent values
 - more complex ways: 
     - regression imputer
@@ -147,7 +147,7 @@ imputed_X_train = pd.DataFrame(my_imputer.fit_transform(X_train))
 imputed_X_train.columns = X_train.columns
 ```
 
-#### An extension to imputation
+### An extension to imputation
 - intuition: imputed values may be systematically above or below their actual values (which weren't collected in the dataset). Or rows with missing values may be unique in some other way. In that case, your model would make better predictions by considering which values were originally missing.
 - method: add a new column to indicate which value is missing
 ![](2019-12-30-15-58-39.png)
@@ -167,7 +167,14 @@ imputed_X_train_plus = pd.DataFrame(my_imputer.fit_transform(X_train_plus))
 # Imputation removed column names; put them back
 imputed_X_train_plus.columns = X_train_plus.columns
 ```
-#### sample codes together
+### sample codes together
+- useful codes
+```python
+# 1. df drop columns or rows
+df.dropna(axis=1, subset=[col1, col2], inplace=True)
+# 2. df select columns with specific data types
+df.select_dtypes(exclude=['object'])
+```
 - prepare the data
 ```python
 import pandas as pd
@@ -233,4 +240,89 @@ imputed_X_valid.columns = X_valid.columns
 
 print("MAE (Imputation):")
 print(score_dataset(imputed_X_train, imputed_X_valid, y_train, y_valid))
+```
+## Categorical variables
+### label encoding
+- Encode target labels with value between 0 and n_classes-1
+- make more sense for ordinal variables
+
+### One-hot encoding
+- creates new columns indicating the presence (or absence) of each possible value in the original data
+![](2020-01-03-11-29-07.png)
+- works well for nominal variables
+- not perform well if the categorical variable takes on a large number of values (i.e., not well if number of categories > 15)
+
+### sample codes
+#### method 1: drop categorical variabels
+```python
+# drop columns in training and validation data
+drop_X_train = X_train.select_dtypes(exclude='object')
+drop_X_valid = X_valid.select_dtypes(exclude='object')
+```
+#### method 2: label encoding
+    - fit to training data and use it to transform both the training and validation data
+    - if existing some categories in validation data but not in training data, there'll be an error
+    - the simplest way to deal with this is to drop the problematic categorical columns
+```python
+# All categorical columns
+object_cols = [col for col in X_train.columns if X_train[col].dtype == "object"]
+
+# Columns that can be safely label encoded
+good_label_cols = [col for col in object_cols if 
+                   set(X_train[col]) == set(X_valid[col])]
+        
+# Problematic columns that will be dropped from the dataset
+bad_label_cols = list(set(object_cols)-set(good_label_cols))
+```
+```python
+from sklearn.preprocessing import LabelEncoder
+
+# Drop categorical columns that will not be encoded
+label_X_train = X_train.drop(bad_label_cols, axis=1)
+label_X_valid = X_valid.drop(bad_label_cols, axis=1)
+
+# Apply label encoder 
+L_encoder = LabelEncoder() 
+for col in good_label_cols:
+    label_X_train[col] = L_encoder.fit_transform(label_X_train[col])
+    label_X_valid[col] = L_encoder.transform(label_X_valid[col])
+```
+
+#### method 3: One-hot encoding
+- investigate cardinality first, drop or encoding variables having high cardinality with label encoder instead.
+```python
+# Get number of unique entries in each column with categorical data
+object_nunique = list(map(lambda col: X_train[col].nunique(), object_cols))
+d = dict(zip(object_cols, object_nunique))
+
+# Print number of unique entries by column, in ascending order
+sorted(d.items(), key=lambda x: x[1])
+```
+```python
+# Columns that will be one-hot encoded
+low_cardinality_cols = [col for col in object_cols if X_train[col].nunique() < 10]
+
+# Columns that will be dropped from the dataset
+high_cardinality_cols = list(set(object_cols)-set(low_cardinality_cols))
+```
+- handle_unknown='ignore', so it doesn't matter if existing problematic categorial columns
+```python
+from sklearn.preprocessing import OneHotEncoder
+
+# Use as many lines of code as you need!
+OH_encoder = OneHotEncoder(handle_unknown='ignore', sparse=False) 
+OH_cols_train = pd.DataFrame(OH_encoder.fit_transform(X_train[low_cardinality_cols])) # Your code here
+OH_cols_valid = pd.DataFrame(OH_encoder.transform(X_valid[low_cardinality_cols])) # Your code here
+
+# One-hot encoding removed index; put it back
+OH_cols_train.index = X_train.index
+OH_cols_valid.index = X_valid.index
+
+# Remove categorical columns (will replace with one-hot encoding)
+num_X_train = X_train.drop(object_cols, axis=1)
+num_X_valid = X_valid.drop(object_cols, axis=1)
+
+# Add one-hot encoded columns to numerical features
+OH_X_train = pd.concat([num_X_train, OH_cols_train], axis=1)
+OH_X_valid = pd.concat([num_X_valid, OH_cols_valid], axis=1)
 ```
