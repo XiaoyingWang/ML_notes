@@ -407,3 +407,154 @@ preds = clf.predict(X_valid)
 
 print('MAE:', mean_absolute_error(y_valid, preds))
 ```
+# Cross-validation
+## notes
+- use different subsets of the data as validate the model
+![](2020-01-07-12-49-54.png)
+- give a more accurate measure of model quality, but take more time to run
+    - small dataset, use cross-validation
+    - large dataset, a single validation is sufficient
+
+## sample code
+- much easier to use pipeline
+- scoring parameter: https://scikit-learn.org/stable/modules/model_evaluation.html
+- Scikit-learn has a convention where all metrics are defined so a high number is better. So MAE score is negative here.
+
+- in this example, just use numerical columns to predict price
+    - simple imputer
+    - random forest regressor
+    - use cross validation to tune the n_estimators in random forest
+        - too low is underfitting
+        - too high is overfitting
+```python
+import pandas as pd
+
+# Remove rows with missing target, separate target from predictors
+train_data.dropna(axis=0, subset=['SalePrice'], inplace=True)
+y = train_data.SalePrice              
+train_data.drop(['SalePrice'], axis=1, inplace=True)
+
+# Select numeric columns only
+numeric_cols = [cname for cname in train_data.columns if train_data[cname].dtype in ['int64', 'float64']]
+X = train_data[numeric_cols].copy()
+```
+
+- function `get_score()` that reports the average (over three cross-validation folds) MAE of a machine learning pipeline
+```python
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.model_selection import cross_val_score
+
+def get_score(n_estimators):
+    """Return the average MAE over 3 CV folds of random forest model.
+    
+    Keyword argument:
+    n_estimators -- the number of trees in the forest
+    """
+    my_pipelines = Pipeline(steps=[('preprocessor', SimpleImputer()),
+                                   ('model', RandomForestRegressor(n_estimators=n_estimators, random_state=0))])
+    scores = -1 * cross_val_score(my_pipelines, X, y, cv=3, scoring='neg_mean_absolute_error')
+    return scores.mean()
+```
+- test differet hyper-parameter values, and store them in a dictionary
+```python
+results = {} 
+for i in range(1, 9):
+    results[50 * i] = get_score(n_estimators=50 * i)
+
+```
+- find the best hyper-parameter value
+```python
+import matplotlib.pyplot as plt
+%matplotlib inline
+
+plt.plot(results.keys(), results.values())
+plt.show()
+```
+![](2020-01-07-13-54-59.png)
+
+# Xgboost
+## Notes
+- good for standard tabular data
+- extreme gradient boosting: ensemble method
+    - ensemble methods combine the predictions of several models (e.g., several trees, in the case of random forests).
+- Gradient boosting is a method that goes through cycles to iteratively add models into an ensemble.
+![](2020-01-07-14-38-33.png)
+- key parameters tuning
+    - n_estimators
+        -  how many times to go through the modeling cycle. number of models
+        - too low: underfitting
+        - too high: overfitting
+    - early_stopping_rounds
+        - causes the model to stop iterating when the validation score stops improving, even if we aren't at the hard stop for n_estimators
+        - since a single round could be by chance, usually set as 5, stop after 5 straight rounds of deteriorating validation scores
+    - eval_set
+        - When using early_stopping_rounds, you also need to set aside some data for calculating the validation scores - this is done by setting the eval_set parameter
+    - learning_rate
+        - Instead of getting predictions by simply adding up the predictions from each component model, we can multiply the predictions from each model by a small number (known as the learning rate) before adding them in.
+        - This means each tree we add to the ensemble helps us less. So, we can set a higher value for n_estimators without overfitting. 
+    - n_jobs
+        - use parallelism to build your models faster
+            - It's common to set the parameter n_jobs equal to the number of cores on your machine. On smaller datasets, this won't help.
+- In general, a small learning rate and large number of estimators will yield more accurate XGBoost models, though it will also take the model longer to train
+
+## Sample codes
+- scikit-learn has a gradient module, but XGBoost has some technical advantages  https://xgboost.readthedocs.io/en/latest/python/python_api.html#xgboost.XGBRegressor
+- use numberic columns, and categorical columns with low cardinality
+- drop missing values
+- one-hot encoding using Pandas
+```python 
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+# Remove rows with missing target, separate target from predictors
+X.dropna(axis=0, subset=['SalePrice'], inplace=True)
+y = X.SalePrice              
+X.drop(['SalePrice'], axis=1, inplace=True)
+
+# Break off validation set from training data
+X_train_full, X_valid_full, y_train, y_valid = train_test_split(X, y, train_size=0.8, test_size=0.2,
+                                                                random_state=0)
+
+# "Cardinality" means the number of unique values in a column
+# Select categorical columns with relatively low cardinality (convenient but arbitrary)
+low_cardinality_cols = [cname for cname in X_train_full.columns if X_train_full[cname].nunique() < 10 and 
+                        X_train_full[cname].dtype == "object"]
+
+# Select numeric columns
+numeric_cols = [cname for cname in X_train_full.columns if X_train_full[cname].dtype in ['int64', 'float64']]
+
+# Keep selected columns only
+my_cols = low_cardinality_cols + numeric_cols
+X_train = X_train_full[my_cols].copy()
+X_valid = X_valid_full[my_cols].copy()
+X_test = X_test_full[my_cols].copy()
+
+# One-hot encode the data (to shorten the code, we use pandas)
+X_train = pd.get_dummies(X_train)
+X_valid = pd.get_dummies(X_valid)
+X_test = pd.get_dummies(X_test)
+X_train, X_valid = X_train.align(X_valid, join='left', axis=1)
+X_train, X_test = X_train.align(X_test, join='left', axis=1)
+```
+- Pandas.align https://stackoverflow.com/questions/51645195/pandas-align-function-illustrative-example
+
+- build the model
+    - verbose=False, otherwise will print the iteration details
+```python
+from xgboost import XGBRegressor
+from sklearn.metrics import mean_absolute_error
+
+# Define the model
+my_model_2 = XGBRegressor(n_estimators=500, learning_rate=0.05, n_jobs=4) 
+
+# Fit the model
+my_model_2.fit(X_train, y_train, early_stopping_rounds=5, eval_set=[(X_valid, y_valid)], verbose=False) 
+
+# Get predictions
+predictions_2 = my_model_2.predict(X_valid) 
+
+# Calculate MAE
+mae_2 = mean_absolute_error(predictions_2, y_valid
+```
