@@ -1,4 +1,6 @@
 https://www.kaggle.com/learn/overview
+
+https://scikit-learn.org/stable/modules/classes.html
 # Intro to machine learning
 ## Key words
 - decision tree regression; random forest
@@ -558,3 +560,11 @@ predictions_2 = my_model_2.predict(X_valid)
 # Calculate MAE
 mae_2 = mean_absolute_error(predictions_2, y_valid
 ```
+
+# Data leakage
+## Notes
+- Data leakage (or leakage) happens when your training data contains information about the target, but similar data will not be available when the model is used for prediction. 
+- There are two main types of leakage: target leakage and train-test contamination.
+    - Target leakage occurs when your predictors include data that will not be available at the time you make predictions. This predictor could happen after the target
+        - ex. to predict the amount of shoelaces need in current month, one predictor is amount of leather they ended up using in this month
+    - Recall that validation is meant to be a measure of how the model does on data that it hasn't considered before. You can corrupt this process in subtle ways if the validation data affects the preprocessing behavior. This is sometimes called train-test contamination.
